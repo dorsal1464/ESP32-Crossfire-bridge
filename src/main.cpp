@@ -7,7 +7,6 @@
 #include "defines.h"
 #include "esp_wifi.h"
 
-
 // #define WROOM_TX
 
 #if defined(WROOM_TX)
@@ -16,8 +15,9 @@
 #define PEER_MAC TX_ADDR
 #endif
 
-int g_rssi = 0;
-int g_led_on = 0;
+static int g_rssi = 0;
+static unsigned long g_led_on = 0;
+static unsigned long currentMillis = 0;
 
 esp_now_peer_info_t g_peer_info = {
     .peer_addr = PEER_MAC,
@@ -73,7 +73,9 @@ void promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if ((ACTION_SUBTYPE == (hdr->frame_ctrl & 0xFF)) && (memcmp(ipkt->payload + 1, ESPRESSIF_OUI, 3) == 0)) {
         g_rssi = ppkt->rx_ctrl.rssi;
         Serial.printf("\tRSSI: %ddbm\n", g_rssi);
-        digitalWrite(LED_PIN, HIGH);
+#if defined(C3_RX)
+        digitalWrite(LED_PIN, LOW);
+#endif
         g_led_on = millis();
     }
 }
@@ -86,17 +88,24 @@ void setupCsrfUart() {
 
     crsf.begin(crsfHwSerial);
     pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
+    digitalWrite(LED_PIN, HIGH);
 #endif
 }
 
 void setup() {
+    currentMillis = millis();
     Serial.begin(BAUD_RATE);
     delay(1000);
 
     setupCsrfUart();
 
-    WiFi.mode(WIFI_STA);
+    WiFi.mode(WIFI_MODE_STA);
+    ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20));
+    ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(80));
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    ESP_ERROR_CHECK(
+        esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_LR));
+    ESP_ERROR_CHECK(esp_wifi_config_80211_tx_rate(WIFI_IF_STA, WIFI_PHY_RATE_LORA_250K));
     WiFi.begin();
 
     readMacAddress();
@@ -121,19 +130,25 @@ void loop() {
 #if defined(C3_RX)
     crsf.update();
     if (millis() - g_led_on > 50) {
-        digitalWrite(LED_PIN, LOW);
+        digitalWrite(LED_PIN, HIGH);
+        g_led_on = millis();
     }
 #endif
-    uint8_t myData[] = "ALIVE!\x00";
-    esp_err_t result = esp_now_send(g_peer_info.peer_addr, (uint8_t *)&myData, sizeof(myData));
 
-    if (result == ESP_OK) {
-    } else {
-        Serial.println("Error sending the data");
-    }
-    delay(2000);
+    if (millis() - currentMillis > 2000) {
+        uint8_t myData[] = "ALIVE!\x00";
+        esp_err_t result = esp_now_send(g_peer_info.peer_addr, (uint8_t *)&myData, sizeof(myData));
+
+        if (result == ESP_OK) {
+        } else {
+            Serial.println("Error sending the data");
+        }
+        currentMillis = millis();
 #if defined(C3_RX)
-    crsf_channels_t pkt = {0};
-    crsf.queuePacket(CRSF_ADDRESS_CRSF_TRANSMITTER, CRSF_FRAMETYPE_RC_CHANNELS_PACKED, &pkt, sizeof(pkt));
+        crsf_channels_t pkt = {0};
+        crsf.queuePacket(CRSF_ADDRESS_CRSF_TRANSMITTER, CRSF_FRAMETYPE_RC_CHANNELS_PACKED, &pkt, sizeof(pkt));
 #endif
+    }
+    // 100Hz
+    delay(10);
 }
