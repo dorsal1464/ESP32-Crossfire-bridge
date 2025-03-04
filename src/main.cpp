@@ -6,6 +6,8 @@
 
 #include "defines.h"
 #include "esp_wifi.h"
+#include "rx.h"
+#include "tx.h"
 
 // #define WROOM_TX
 
@@ -16,8 +18,6 @@
 #endif
 
 static int g_rssi = 0;
-static unsigned long g_led_on = 0;
-static unsigned long currentMillis = 0;
 
 esp_now_peer_info_t g_peer_info = {
     .peer_addr = PEER_MAC,
@@ -28,17 +28,7 @@ esp_now_peer_info_t g_peer_info = {
 
 uint8_t peer_addr[] = PEER_MAC;
 
-#if defined(C3_RX)
-#define PIN_RX 20
-#define PIN_TX 21
-#define LED_PIN 8
-
-// Set up a new Serial object
-HardwareSerial crsfHwSerial(1);
-AlfredoCRSF crsf;
-#endif
-
-void readMacAddress() {
+static void readMacAddress() {
     Serial.print("[DEFAULT] ESP32 Board MAC Address: ");
     uint8_t baseMac[6];
     esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, baseMac);
@@ -49,14 +39,17 @@ void readMacAddress() {
     }
 }
 
-void OnWifiDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+static void OnWifiDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     Serial.print("Packet Send Status: ");
     Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
 }
 
-void OnWifiDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) { Serial.printf("Got pkt: %s\n", incomingData); }
+static void OnWifiDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+    rx_data_received(mac, incomingData, len);
+    tx_data_received(mac, incomingData, len);
+}
 
-void promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
+static void promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     // All espnow traffic uses action frames which are a subtype of the mgmnt
     // frames so filter out everything else.
     if (type != WIFI_PKT_MGMT) return;
@@ -73,31 +66,13 @@ void promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
     if ((ACTION_SUBTYPE == (hdr->frame_ctrl & 0xFF)) && (memcmp(ipkt->payload + 1, ESPRESSIF_OUI, 3) == 0)) {
         g_rssi = ppkt->rx_ctrl.rssi;
         Serial.printf("\tRSSI: %ddbm\n", g_rssi);
-#if defined(C3_RX)
-        digitalWrite(LED_PIN, LOW);
-#endif
-        g_led_on = millis();
+        rx_turn_on_led();
     }
 }
 
-void setupCsrfUart() {
-#if defined(C3_RX)
-    crsfHwSerial.begin(CRSF_BAUDRATE, SERIAL_8N1, PIN_RX, PIN_TX);
-    if (!crsfHwSerial)
-        while (1) Serial.println("Invalid crsfSerial configuration");
-
-    crsf.begin(crsfHwSerial);
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, HIGH);
-#endif
-}
-
 void setup() {
-    currentMillis = millis();
     Serial.begin(BAUD_RATE);
     delay(1000);
-
-    setupCsrfUart();
 
     WiFi.mode(WIFI_MODE_STA);
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20));
@@ -124,31 +99,13 @@ void setup() {
         Serial.println("Failed to add peer");
         return;
     }
+    rx_setup();
+    tx_setup();
 }
 
 void loop() {
-#if defined(C3_RX)
-    crsf.update();
-    if (millis() - g_led_on > 50) {
-        digitalWrite(LED_PIN, HIGH);
-        g_led_on = millis();
-    }
-#endif
-
-    if (millis() - currentMillis > 2000) {
-        uint8_t myData[] = "ALIVE!\x00";
-        esp_err_t result = esp_now_send(g_peer_info.peer_addr, (uint8_t *)&myData, sizeof(myData));
-
-        if (result == ESP_OK) {
-        } else {
-            Serial.println("Error sending the data");
-        }
-        currentMillis = millis();
-#if defined(C3_RX)
-        crsf_channels_t pkt = {0};
-        crsf.queuePacket(CRSF_ADDRESS_CRSF_TRANSMITTER, CRSF_FRAMETYPE_RC_CHANNELS_PACKED, &pkt, sizeof(pkt));
-#endif
-    }
+    rx_loop();
+    tx_loop();
     // 100Hz
     delay(10);
 }
