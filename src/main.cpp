@@ -73,8 +73,9 @@ static void promiscuous_rx_cb(void *buf, wifi_promiscuous_pkt_type_t type) {
 void setup() {
     Serial.begin(BAUD_RATE);
     delay(1000);
-
+    Serial.println("Starting...");
     WiFi.mode(WIFI_MODE_STA);
+    
     ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20));
     ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(80));
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
@@ -92,7 +93,7 @@ void setup() {
     }
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(promiscuous_rx_cb);
-    esp_now_register_send_cb(OnWifiDataSent);
+    // esp_now_register_send_cb(OnWifiDataSent);
     esp_now_register_recv_cb(OnWifiDataRecv);
 
     if (esp_now_add_peer(&g_peer_info) != ESP_OK) {
@@ -106,6 +107,6 @@ void setup() {
 void loop() {
     rx_loop();
     tx_loop();
-    // 100Hz
-    delay(10);
+    // 250Hz
+    delay(1000 / 250);
 }

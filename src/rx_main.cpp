@@ -33,8 +33,6 @@ static void setup_crsf_uart() {
         while (1) Serial.println("Invalid crsfSerial configuration");
 
     crsf.begin(crsfHwSerial);
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, HIGH);
 }
 
 void rx_setup() {
